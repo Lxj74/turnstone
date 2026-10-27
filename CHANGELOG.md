@@ -10,97 +10,75 @@ All development now integrates on `main`. Supported release lines are maintained
 on `stable/X.Y` branches; `stable/1.8` preserves the former stable branch.
 The separate `dev` branch is retired. See [the release process](docs/releasing.md).
 
-## [2026-10-27]
+## [1.9.1]
 
-### Fixed
-
-- **MCP servers that refuse the protocol probe with error -32000 connect again
-  (#1489).** Since 1.9.0, a Streamable HTTP server that answered the
-  `server/discover` probe with HTTP 400 and JSON-RPC error -32000, as many
-  servers that predate the 2026-07-28 revision do, failed to connect with "The
-  connection closed before the server answered". The connection now falls back
-  to the `initialize` handshake, as it does for other refusals.
-- **A speech model's `max_concurrency` now applies to dictation and read-aloud
-  (#1485).** Speech-to-text and text-to-speech called the model directly, so a
-  limit set on a speech model was never enforced. Dictation now waits up to 15
-  seconds for a free slot, on four threads per node of its own, and read-aloud
-  takes one only if it is free at once, in addition to the node's limit of two
-  clips. When no slot comes free in time the node answers 429 with
-  `Retry-After`, which the browser retries. On a direct connection, a dictation
-  whose browser leaves stops waiting for a slot. Transcribing an audio
-  attachment for a chat model that can't take audio waits for a slot like any
-  model call.
-
-## [2026-10-26]
-
-### Added
-
-- **`/model` in coordinator sessions.** Typing `/model` or `/model <alias>` in a
-  coordinator now shows or switches its model, as in an interactive workstream,
-  instead of sending the text to the model. Other text, including other slash
-  commands, still goes to the coordinator as a message. The console serves it at
-  `POST /v1/api/workstreams/{ws_id}/command`, gated on `admin.coordinator`.
-
-## [2026-10-25]
+> **Before upgrading:** the database advances from migration 083 to 084, which
+> adds the MCP certificate setting below, off for every existing server.
+> Migrations run automatically; upgrade every process that shares the database
+> together. Custom storage backends must accept `tls_skip_verify` in
+> `create_mcp_server` and return whether it inserted a row, and
+> `update_mcp_server` must raise `StorageConflictError` when a new name is
+> taken.
 
 ### Added
 
 - **Skip certificate verification for one MCP server.** A Streamable HTTP server
-  whose certificate cannot be added to the trust store, such as a device that
-  makes its own self-signed certificate, can be reached with
-  `tls_skip_verify = true` in its configuration entry or **Skip certificate
-  verification** in the admin console's server form. It is off by default and
-  refused for per-user OAuth and stdio servers. With it on, anyone who can
-  intercept the connection can pose as the server. The console's server list
-  marks every saved server that skips verification, and the audit log records
-  the setting whenever such a server is created, edited, imported or tested.
-  Migration 084 adds the setting, off for every existing server. See
-  [Servers with self-signed certificates](docs/tools.md#servers-with-self-signed-certificates).
-- **MCP server audit events record where each server points.** Creating,
-  importing or installing a Streamable HTTP server records its
-  `scheme://host:port`, so the audit log keeps the host after the server is
-  deleted, including one whose certificate went unchecked.
+  whose certificate cannot be added to the trust store, such as a device's own
+  self-signed one, can be reached with `tls_skip_verify = true` in its
+  configuration entry or **Skip certificate verification** in the console's
+  server form. Anyone who can intercept the connection can then pose as the
+  server. It is off by default and refused for per-user OAuth and stdio
+  servers; the console's server list marks it, and the audit log records it.
+  See [Servers with self-signed certificates](docs/tools.md#servers-with-self-signed-certificates).
+- **MCP audit events name the server's host.** Creating, importing or installing
+  a Streamable HTTP server records its `scheme://host:port`, so the log keeps
+  the host after the server is deleted.
+- **`/model` in coordinator sessions.** `/model` and `/model <alias>` show or
+  switch a coordinator's model, as in an interactive workstream, instead of
+  going to the model as a message; other text still does. The console serves it
+  at `POST /v1/api/workstreams/{ws_id}/command`, gated on `admin.coordinator`.
 
 ### Fixed
 
-- **MCP server booleans are parsed strictly.** Creating or editing an MCP server
-  refuses an `auto_approve` or `enabled` that is not `true`, `false`, `0` or
-  `1`, and refuses `null` as schedules already do; the string `"false"` used to
-  count as true, and `null` as false. The Python SDK's `create_mcp_server` sends
-  such values as given, `None` included, so the console refuses them where the
-  SDK used to coerce them.
-- **Skill and schedule booleans are parsed strictly.** An `auto_approve` or
-  `enabled` that is not `true`, `false`, `0` or `1` is refused when a skill is
-  created or edited (from the admin API or the `skills` tool) and when a
-  schedule is; the string `"false"` used to count as true. A skill also
-  refuses either flag or `allowed_tools` sent as `null`, as schedules already
-  do: a null flag used to turn the flag off, and a null `allowed_tools` stored a
-  tool named `None`.
-- **The MCP server update audit no longer records a full URL or a stdio
-  server's arguments.** It records a changed URL as `scheme://host:port`, and an
-  OAuth audience or authorization server given as an http(s) URL the same way;
-  it leaves out the unchanged URL the server form re-sends with every save, and
-  records arguments only as `(updated)`, as it does headers and env. A URL's
-  path or query and an API key passed as an argument, either of which can be a
-  credential, used to land in the audit log.
-- **An MCP server name, or a registry server, that another save takes at the
-  same moment is refused.** Creating or installing the server answers `409`,
-  and an import lists it as skipped. The losing request used to report success
-  with an incomplete response and audit a server it never stored. A rename that
-  loses the race answers `409` where it answered 500.
-- **An edit of an MCP server another admin deletes at the same moment answers
-  `404`.** It used to answer 200, audit the edit and reload the nodes for a
-  server that no longer existed.
-- **An MCP import entry that is not an object** is listed among the import's
-  errors, whether or not its name is taken. One with a new name used to fail the
-  request with a 500 after saving the entries before it, which then got no audit
-  event and no node reload.
-- **An oversize MCP OAuth client secret is refused before anything is saved.**
-  A secret over 1024 characters used to be refused only after the server's row
-  was written, so the change got no audit event and no node reload.
-- **The console's Audit tab shows an object value as JSON** in an event's
-  summary, such as a created server's header references, where it showed
-  `[object Object]`.
+- **MCP servers that refuse the protocol probe connect again (#1489).** In
+  1.9.0, a Streamable HTTP server that answered `server/discover` with HTTP 400
+  and error -32000, as many servers predating the 2026-07-28 revision do, failed
+  with "The connection closed before the server answered". It now falls back to
+  the `initialize` handshake.
+- **A speech model's `max_concurrency` applies to dictation and read-aloud
+  (#1485).** Dictation waits up to 15 seconds for a free slot and read-aloud
+  takes one only if it is free; when none is, the node answers 429 with
+  `Retry-After`, which the browser retries. An alias that serves both chat and
+  dictation now shares its slots between them, and a node runs at most four
+  dictations at once.
+- **Strict booleans for MCP servers, skills and schedules.** `auto_approve` and
+  `enabled` must be `true`, `false`, `0` or `1`; the string `"false"` used to
+  count as true. MCP servers and skills also refuse these flags as `null`, as
+  schedules already did, and a skill refuses a `null` `allowed_tools`, which
+  stored a tool named `None`. The Python SDK's `create_mcp_server` now sends
+  these values as given, so the console refuses a `None` or a string the SDK
+  used to coerce.
+- **Concurrent MCP server saves.** Creating or installing a server whose name,
+  or registry server, another save takes at the same moment answers `409`, and
+  an import lists it as skipped; these used to report success and audit a
+  server that was never stored. An edit of a server another admin deletes at
+  the same moment answers `404` instead of reporting success, and a rename
+  that loses the race answers `409` instead of 500.
+- **MCP server saves that failed part-way.** An import entry that is not an
+  object is listed among the import's errors; one with a new name used to fail
+  the import with a 500 after the entries before it were saved. An OAuth client
+  secret over 1024 characters is refused before anything is saved, not after
+  the server's row was written. Neither left an audit event or node reload.
+- **Audit tab.** An object value in an event's summary, such as a created
+  server's header references, shows as JSON instead of `[object Object]`.
+
+### Security
+
+- **MCP server edit audits no longer record URL paths or stdio arguments.** The
+  update event records a changed URL, and an OAuth audience or authorization
+  server given as an http(s) URL, as `scheme://host:port`, and stdio arguments
+  only as `(updated)`. A URL's path or query, or an API key passed as an
+  argument, used to be recorded in full. Earlier entries are not rewritten.
 
 ## [1.9.0]
 
